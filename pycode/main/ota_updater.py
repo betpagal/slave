@@ -1,14 +1,10 @@
-# 1000 x dank aan Evelien die mijn in deze tijden gesteund heeft
-# ohja, en ook een dikke merci aan tante suker (Jana Dej.) die super voor onze Otis zorgt!
-
-#import usocket
-import os
-import gc
+#import os
+#import gc
 import supervisor
 import board
 import busio
 from digitalio import DigitalInOut
-import adafruit_requests as requests
+import main.lib.adafruit_requests as requests
 import adafruit_esp32spi.adafruit_esp32spi_socket as socket
 from adafruit_esp32spi import adafruit_esp32spi
 from main.secrets import secrets
@@ -17,7 +13,6 @@ class OTAUpdater:
 
     def __init__(self, github_repo, module='', main_dir='', headers={}):
         print('in OTAUpdater.__init__')
-#        self.http_client = HttpClient(headers=headers)
         self.github_repo = github_repo.rstrip('/').replace('https://github.com', 'https://api.github.com/repos')
         print ('self.github_repo: ', self.github_repo)
         self.main_dir = main_dir
@@ -28,7 +23,7 @@ class OTAUpdater:
     @staticmethod
     def using_network():
         print('in using_network')
-        # If you have an AirLift Shield:
+        # using AirLift Shield:
         esp32_cs = DigitalInOut(board.D10)
         esp32_ready = DigitalInOut(board.D9)
         esp32_reset = DigitalInOut(board.D5)
@@ -207,36 +202,36 @@ class OTAUpdater:
         return self.module + '/' + path if self.module else path
 
 
-class Response:
+# class Response:
 
-    def __init__(self, f):
-        self.raw = f
-        self.encoding = 'utf-8'
-        self._cached = None
+#     def __init__(self, f):
+#         self.raw = f
+#         self.encoding = 'utf-8'
+#         self._cached = None
 
-    def close(self):
-        if self.raw:
-            self.raw.close()
-            self.raw = None
-        self._cached = None
+#     def close(self):
+#         if self.raw:
+#             self.raw.close()
+#             self.raw = None
+#         self._cached = None
 
-    @property
-    def content(self):
-        if self._cached is None:
-            try:
-                self._cached = self.raw.read()
-            finally:
-                self.raw.close()
-                self.raw = None
-        return self._cached
+#     @property
+#     def content(self):
+#         if self._cached is None:
+#             try:
+#                 self._cached = self.raw.read()
+#             finally:
+#                 self.raw.close()
+#                 self.raw = None
+#         return self._cached
 
-    @property
-    def text(self):
-        return str(self.content, self.encoding)
+#     @property
+#     def text(self):
+#         return str(self.content, self.encoding)
 
-    def json(self):
-        import ujson
-        return ujson.loads(self.content)
+#     def json(self):
+#         import ujson
+#         return ujson.loads(self.content)
 
 
 # class HttpClient:
