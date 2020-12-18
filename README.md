@@ -1,3 +1,3 @@
 # Stair Slave
-Code and pcb for stair slave. Back to basic.
+Code and pcb for stair slave.
 
