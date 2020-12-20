@@ -1,4 +1,4 @@
-from main.ota_updater import OTAUpdater
+from main.ota_updater import OTAUpdater 
 from main.secrets import secrets
 
 def download_and_install_update_if_available():
