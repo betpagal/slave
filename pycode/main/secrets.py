@@ -2,7 +2,7 @@
 # If you put them in the code you risk committing that info or sharing it
 
 secrets = {
-    'ssid' : 'sfiot',
+    'ssid' : 'sfiot', 
     'password' : '##mises!!',
     'timezone' : "America/New_York", # http://worldtimeapi.org/timezones
     'raspi-stairs_username' : 'pi',
