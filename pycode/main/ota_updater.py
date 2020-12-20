@@ -122,7 +122,8 @@ class OTAUpdater:
         return False
 
     def rmtree(self, directory):
-        for entry in os.ilistdir(directory):
+        print('in rmtree. directory: ', directory)
+        for entry in os.listdir(directory):
             is_dir = entry[1] == 0x4000
             if is_dir:
                 self.rmtree(directory + '/' + entry[0])
@@ -159,18 +160,18 @@ class OTAUpdater:
         for file in file_list.json():
             if file['type'] == 'file':
                 print('found type:file: ', file['download_url'])
-                print('found file in pycode')
                 download_url = file['download_url']
                 download_path = self.modulepath('next/' + file['path'].replace(self.main_dir + '/', ''))
                 pyfile = download_url.replace('refs/tags/', ''), download_path
                 print('pyfile: ', pyfile)
                 if 'pycode/main' in pyfile:
+                    print('found file in pycode: ', pyfile)
                     self.download_file(pyfile)
             elif file['type'] == 'dir':
                 print('found directory: ', file['path'])
-                print('found pycode directory')
                 path = self.modulepath('next/' + file['path'].replace(self.main_dir + '/', ''))
                 if 'pycode/main' in path:
+                    print('found pycode/main directory: ', path)
                     os.mkdir(path)
                     self.download_all_files(root_url + '/' + file['name'], version)
 

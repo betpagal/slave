@@ -7,7 +7,7 @@ import random
 from digitalio import DigitalInOut
 import neopixel
 import supervisor
-from wheel import wheel
+from main.wheel import wheel
 
 class stair_slave:
      neopixel_pin = board.NEOPIXEL
