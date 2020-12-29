@@ -159,17 +159,17 @@ class OTAUpdater:
         file_list = requests.get(dest_path)
         for file in file_list.json():
             if file['type'] == 'file':
-                print('found type:file: ', file['download_url'])
                 download_url = file['download_url']
-                download_path = self.modulepath('next/' + file['path'].replace(self.main_dir + '/', ''))
-                pyfile = download_url.replace('refs/tags/', ''), download_path
-                print('pyfile: ', pyfile)
-                if 'pycode/main' in pyfile:
+                print('found type:file: ', download_url)
+                if 'pycode/main' in download_url:
+                    download_path = self.modulepath('next/' + self.main_dir) #file['path'].replace(self.main_dir + '/', ''))
+                    pyfile = download_url.replace('refs/tags/', ''), download_path
+                    print('pyfile: ', pyfile)
                     print('found file in pycode: ', pyfile)
                     self.download_file(pyfile)
             elif file['type'] == 'dir':
                 print('found directory: ', file['path'])
-                path = self.modulepath('next/' + file['path'].replace(self.main_dir + '/', ''))
+                path = self.modulepath('next/' + self.main_dir)# file['path'].replace(self.main_dir + '/', ''))
                 if 'pycode/main' in path:
                     print('found pycode/main directory: ', path)
                     os.mkdir(path)

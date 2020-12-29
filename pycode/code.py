@@ -3,7 +3,7 @@ from main.secrets import secrets
 
 def download_and_install_update_if_available():
     global o
-    o = OTAUpdater('https://github.com/betpagal/House')
+    o = OTAUpdater('https://github.com/betpagal/slave')
     o.download_and_install_update_if_available(secrets["ssid"], secrets["password"])
 
 def start():
