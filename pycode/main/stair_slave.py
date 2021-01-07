@@ -1,326 +1,210 @@
-# The MIT License (MIT)
-#
-# Copyright (c) 2019 Melissa LeBlanc-Williams for Adafruit Industries
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-
-"""
-`adafruit_esp32spi_wifimanager`
-================================================================================
-
-WiFi Manager for making ESP32 SPI as WiFi much easier
-
-* Author(s): Melissa LeBlanc-Williams, ladyada
-"""
-
-# pylint: disable=no-name-in-module
-
-from time import sleep
-from micropython import const
+import time
+import sys
+import digitalio
+import board
+import busio
+import pulseio
+import random
+from digitalio import DigitalInOut
+from analogio import AnalogIn
+import neopixel
+import supervisor
 from adafruit_esp32spi import adafruit_esp32spi
+from adafruit_esp32spi import adafruit_esp32spi_wifimanager
 import adafruit_esp32spi.adafruit_esp32spi_socket as socket
-import adafruit_requests as requests
+from adafruit_minimqtt import MQTT
+from wheel import wheel
 
+LED_RED = (255, 0, 0)
+LED_YELLOW = (255, 150, 0)
+LED_GREEN = (0, 255, 0)
+LED_CYAN = (0, 255, 255)
+LED_BLUE = (0, 0, 255)
+LED_PURPLE = (180, 0, 255)
 
-class ESPSPI_WiFiManager:
-    """
-    A class to help manage the Wifi connection
-    """
-    NORMAL = const(1)
-    ENTERPRISE = const(2)
+# Get wifi details and more from a secrets.py file
+try:
+    from secrets import secrets
+except ImportError:
+    print("WiFi secrets are kept in secrets.py, please add them there!")
+    raise
 
-    # pylint: disable=too-many-arguments
-    def __init__(self, esp, secrets, status_pixel=None, attempts=2,
-                 connection_type=NORMAL, debug=False):
-        """
-        :param ESP_SPIcontrol esp: The ESP object we are using
-        :param dict secrets: The WiFi and Adafruit IO secrets dict (See examples)
-        :param status_pixel: (Optional) The pixel device - A NeoPixel, DotStar,
-            or RGB LED (default=None)
-        :type status_pixel: NeoPixel, DotStar, or RGB LED
-        :param int attempts: (Optional) Failed attempts before resetting the ESP32 (default=2)
-        :param const connection_type: (Optional) Type of WiFi connection: NORMAL or ENTERPRISE
-        """
-        # Read the settings
-        self.esp = esp
-        self.debug = debug
-        self.ssid = secrets['ssid']
-        self.password = secrets.get('password', None)
-        self.attempts = attempts
-        self._connection_type = connection_type
-        requests.set_socket(socket, esp)
-        self.statuspix = status_pixel
-        self.pixel_status(0)
+neopixel_pin = board.D13 #NEOPIXEL #D13 # .NEOPIXEL
+ww_level = 10
+cw_level = 10
 
-        # Check for WPA2 Enterprise keys in the secrets dictionary and load them if they exist
-        if secrets.get('ent_ssid'):
-            self.ent_ssid = secrets['ent_ssid']
-        else:
-            self.ent_ssid = secrets['ssid']
-        if secrets.get('ent_ident'):
-            self.ent_ident = secrets['ent_ident']
-        else:
-            self.ent_ident = ''
-        if secrets.get('ent_user'):
-            self.ent_user = secrets['ent_user']
-        if secrets.get('ent_password'):
-            self.ent_password = secrets['ent_password']
-    # pylint: enable=too-many-arguments
+ir_in = AnalogIn(board.A3)
+tx_out = digitalio.DigitalInOut(board.TX)
+tx_out.direction = digitalio.Direction.OUTPUT
 
-    def reset(self):
-        """
-        Perform a hard reset on the ESP32
-        """
-        if self.debug:
-            print("Resetting ESP32")
-        self.esp.reset()
+# NeoPixel strip (of 16 LEDs) connected on D4
+NUMPIXELS = 100
+neopixels = neopixel.NeoPixel(neopixel_pin, NUMPIXELS, brightness=1, auto_write=False)
+status_light = neopixel.NeoPixel(board.NEOPIXEL, 1, brightness=0.01)
+cwled = pulseio.PWMOut(board.D11)
+wwled = pulseio.PWMOut(board.D12)
 
-    def connect(self):
-        """
-        Attempt to connect to WiFi using the current settings
-        """
-        if self.debug:
-            if self.esp.status == adafruit_esp32spi.WL_IDLE_STATUS:
-                print("ESP32 found and in idle mode")
-            print("Firmware vers.", self.esp.firmware_version)
-            print("MAC addr:", [hex(i) for i in self.esp.MAC_address])
-            for access_pt in self.esp.scan_networks():
-                print("\t%s\t\tRSSI: %d" % (str(access_pt['ssid'], 'utf-8'), access_pt['rssi']))
-        if self._connection_type == ESPSPI_WiFiManager.NORMAL:
-            self.connect_normal()
-        elif self._connection_type == ESPSPI_WiFiManager.ENTERPRISE:
-            self.connect_enterprise()
-        else:
-            raise TypeError("Invalid WiFi connection type specified")
+# AirLift Feather Wing
+esp32_cs = DigitalInOut(board.D10)
+esp32_ready = DigitalInOut(board.D9)
+esp32_reset = DigitalInOut(board.D6)
 
-    def connect_normal(self):
-        """
-        Attempt a regular style WiFi connection
-        """
-        failure_count = 0
-        while not self.esp.is_connected:
-            try:
-                if self.debug:
-                    print("Connecting to AP...")
-                self.pixel_status((100, 0, 0))
-                self.esp.connect_AP(bytes(self.ssid, 'utf-8'), bytes(self.password, 'utf-8'))
-                failure_count = 0
-                self.pixel_status((0, 100, 0))
-            except (ValueError, RuntimeError) as error:
-                print("Failed to connect, retrying\n", error)
-                failure_count += 1
-                if failure_count >= self.attempts:
-                    failure_count = 0
-                    self.reset()
-                continue
+spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
+esp = adafruit_esp32spi.ESP_SPIcontrol(spi, esp32_cs, esp32_ready, esp32_reset)
 
-    def create_ap(self):
-        """
-        Attempt to initialize in Access Point (AP) mode.
-        Uses SSID and optional passphrase from the current settings
-        Other WiFi devices will be able to connect to the created Access Point
-        """
-        failure_count = 0
-        while not self.esp.ap_listening:
-            try:
-                if self.debug:
-                    print("Waiting for AP to be initialized...")
-                self.pixel_status((100, 0, 0))
-                if self.password:
-                    self.esp.create_AP(bytes(self.ssid, 'utf-8'), bytes(self.password, 'utf-8'))
-                else:
-                    self.esp.create_AP(bytes(self.ssid, 'utf-8'), None)
-                failure_count = 0
-                self.pixel_status((0, 100, 0))
-            except (ValueError, RuntimeError) as error:
-                print("Failed to create access point\n", error)
-                failure_count += 1
-                if failure_count >= self.attempts:
-                    failure_count = 0
-                    self.reset()
-                continue
-        print("Access Point created! Connect to ssid:\n {}".format(self.ssid))
+wifi = adafruit_esp32spi_wifimanager.ESPSPI_WiFiManager(esp, secrets, neopixels, debug=True) 
 
-    def connect_enterprise(self):
-        """
-        Attempt an enterprise style WiFi connection
-        """
-        failure_count = 0
-        self.esp.wifi_set_network(bytes(self.ent_ssid, 'utf-8'))
-        self.esp.wifi_set_entidentity(bytes(self.ent_ident, 'utf-8'))
-        self.esp.wifi_set_entusername(bytes(self.ent_user, 'utf-8'))
-        self.esp.wifi_set_entpassword(bytes(self.ent_password, 'utf-8'))
-        self.esp.wifi_set_entenable()
-        while not self.esp.is_connected:
-            try:
-                if self.debug:
-                    print("Waiting for the ESP32 to connect to the WPA2 Enterprise AP...")
-                self.pixel_status((100, 0, 0))
-                sleep(1)
-                failure_count = 0
-                self.pixel_status((0, 100, 0))
-                sleep(1)
-            except (ValueError, RuntimeError) as error:
-                print("Failed to connect, retrying\n", error)
-                failure_count += 1
-                if failure_count >= self.attempts:
-                    failure_count = 0
-                    self.reset()
-                continue
+broker = 'io.adafruit.com'
+port = 1883
 
-    def get(self, url, **kw):
-        """
-        Pass the Get request to requests and update status LED
+# Setup a feed named 'photocell' for publishing
+photocell_feed = secrets['aio_username'] + '/feeds/photocell'
+# Setup feeds for subscribing to changes
+cw_feed = secrets['aio_username'] + '/feeds/cw-level'
+ww_feed = secrets['aio_username'] + '/feeds/ww-level'
 
-        :param str url: The URL to retrieve data from
-        :param dict data: (Optional) Form data to submit
-        :param dict json: (Optional) JSON data to submit. (Data must be None)
-        :param dict header: (Optional) Header data to include
-        :param bool stream: (Optional) Whether to stream the Response
-        :return: The response from the request
-        :rtype: Response
-        """
-        if not self.esp.is_connected:
-            self.connect()
-        self.pixel_status((0, 0, 100))
-        return_val = requests.get(url, **kw)
-        self.pixel_status(0)
-        return return_val
+def get_voltage(pin):
+    return (pin.value / 33000)# * 3.3) #/ 65536
 
-    def post(self, url, **kw):
-        """
-        Pass the Post request to requests and update status LED
+def mqtt_connected(client, userdata, flags, rc):
+    # This function will be called when the client is connected
+    # successfully to the broker.
+    print('Connected')
+    status_light[0] = LED_GREEN
+    status_light.show()
+    # Subscribe to all changes on the feeds.
+    client.subscribe(ww_feed)
+    client.subscribe(cw_feed)
 
-        :param str url: The URL to post data to
-        :param dict data: (Optional) Form data to submit
-        :param dict json: (Optional) JSON data to submit. (Data must be None)
-        :param dict header: (Optional) Header data to include
-        :param bool stream: (Optional) Whether to stream the Response
-        :return: The response from the request
-        :rtype: Response
-        """
-        if not self.esp.is_connected:
-            self.connect()
-        self.pixel_status((0, 0, 100))
-        return_val = requests.post(url, **kw)
-        return return_val
+def mqtt_disconnected(client, userdata, rc):
+    # This method is called when the client is disconnected
+    status_light[0] = LED_RED
+    status_light.show()
+    print('Disconnected')
 
-    def put(self, url, **kw):
-        """
-        Pass the put request to requests and update status LED
+def mqtt_message(client, topic, message):
+    # This method is called when a topic the client is subscribed to
+    # has a new message.
+    status_light[0] = LED_PURPLE
+    status_light.show()
 
-        :param str url: The URL to PUT data to
-        :param dict data: (Optional) Form data to submit
-        :param dict json: (Optional) JSON data to submit. (Data must be None)
-        :param dict header: (Optional) Header data to include
-        :param bool stream: (Optional) Whether to stream the Response
-        :return: The response from the request
-        :rtype: Response
-        """
-        if not self.esp.is_connected:
-            self.connect()
-        self.pixel_status((0, 0, 100))
-        return_val = requests.put(url, **kw)
-        self.pixel_status(0)
-        return return_val
+    if '/cw-level' in topic:
+        cw_level = message
+        print('cw', cw_level, sep = '', end = ' ')
+        cwled.duty_cycle = int(cw_level) * 650
+    if '/ww-level' in topic:
+        ww_level = message
+        print('ww', ww_level, sep = '', end = ' ')
+        wwled.duty_cycle = int(ww_level) * 650
 
-    def patch(self, url, **kw):
-        """
-        Pass the patch request to requests and update status LED
+    status_light[0] = LED_GREEN
+    status_light.show()
 
-        :param str url: The URL to PUT data to
-        :param dict data: (Optional) Form data to submit
-        :param dict json: (Optional) JSON data to submit. (Data must be None)
-        :param dict header: (Optional) Header data to include
-        :param bool stream: (Optional) Whether to stream the Response
-        :return: The response from the request
-        :rtype: Response
-        """
-        if not self.esp.is_connected:
-            self.connect()
-        self.pixel_status((0, 0, 100))
-        return_val = requests.patch(url, **kw)
-        self.pixel_status(0)
-        return return_val
+def mqtt_subscribe(client, userdata, topic, granted_qos):
+    print('Subscribed to {0} with QOS level {1}'.format(topic, granted_qos))
 
-    def delete(self, url, **kw):
-        """
-        Pass the delete request to requests and update status LED
+def mqtt_unsubscribe(client, userdata, topic, pid):
+    print('Unsubscribed from {0} with PID {1}'.format(topic, pid))
 
-        :param str url: The URL to PUT data to
-        :param dict data: (Optional) Form data to submit
-        :param dict json: (Optional) JSON data to submit. (Data must be None)
-        :param dict header: (Optional) Header data to include
-        :param bool stream: (Optional) Whether to stream the Response
-        :return: The response from the request
-        :rtype: Response
-        """
-        if not self.esp.is_connected:
-            self.connect()
-        self.pixel_status((0, 0, 100))
-        return_val = requests.delete(url, **kw)
-        self.pixel_status(0)
-        return return_val
+# Set up a MiniMQTT Client
+mqtt_client = MQTT(socket,
+    broker = broker,
+    port = port,
+    username = secrets['aio_username'],
+    password = secrets['aio_key'],
+    network_manager = wifi)
 
-    def ping(self, host, ttl=250):
-        """
-        Pass the Ping request to the ESP32, update status LED, return response time
+def mqtt_connect_all():
+    print('1', end = ' ')
+    status_light[0] = LED_YELLOW
+    status_light.show()
+    
+    print('2', end = ' ')
+    tx_out.value = True
 
-        :param str host: The hostname or IP address to ping
-        :param int ttl: (Optional) The Time To Live in milliseconds for the packet (default=250)
-        :return: The response time in milliseconds
-        :rtype: int
-        """
-        if not self.esp.is_connected:
-            self.connect()
-        self.pixel_status((0, 0, 100))
-        response_time = self.esp.ping(host, ttl=ttl)
-        self.pixel_status(0)
-        return response_time
+    print('3', end = ' ')
+    wifi.connect()
 
-    def ip_address(self):
-        """
-        Returns a formatted local IP address, update status pixel.
-        """
-        if not self.esp.is_connected:
-            self.connect()
-        self.pixel_status((0, 0, 100))
-        self.pixel_status(0)
-        return self.esp.pretty_ip(self.esp.ip_address)
+    print('4', end = ' ')
+    status_light[0] = LED_BLUE
+    status_light.show()
 
-    def pixel_status(self, value):
-        """
-        Change Status Pixel if it was defined
+    # Connect the client to the MQTT broker.
+    print("Connecting to", broker)
+    print('5', end = ' ')
+    mqtt_client.connect()
+    print('6', end = ' ')
+    mqtt_client.publish(photocell_feed, "connection", qos=0)
 
-        :param value: The value to set the Board's status LED to
-        :type value: int or 3-value tuple
-        """
-        if self.statuspix:
-            if hasattr(self.statuspix, 'color'):
-                self.statuspix.color = value
-            else:
-                self.statuspix.fill(value)
+# Setup the callback methods above
+mqtt_client.on_connect = mqtt_connected
+mqtt_client.on_disconnect = mqtt_disconnected
+mqtt_client.on_message = mqtt_message
+mqtt_client.on_subscribe = mqtt_subscribe
+mqtt_client.on_unsubscribe = mqtt_unsubscribe
 
-    def signal_strength(self):
-        """
-        Returns receiving signal strength indicator in dBm
-        """
-        if not self.esp.is_connected:
-            self.connect()
-        return self.esp.rssi()
+# Connect the client to the MQTT broker.
+try:
+    print('Connecting to Adafruit IO...'.rstrip())
+    mqtt_connect_all()
+    mqtt_client.publish(cw_feed, 17, qos=0)
+    mqtt_client.publish(ww_feed, 19, qos=0)
+
+    photocell_val = random.randint(0, 1023)
+
+    i = 0
+    while True:
+        
+        # Send a new message
+        photocell_val += random.randint(-100,100)
+        if photocell_val >= 923:
+            photocell_val -= random.randint(0,100)
+        if photocell_val <= 100:
+            photocell_val += random.randint(0,100)
+
+        # make the neopixels swirl around
+        for p in range(NUMPIXELS):
+            idx = int((p * 256 / NUMPIXELS) + i)
+            neopixels[p] = wheel(idx & 255)
+        neopixels.show()
+        #print(neopixels[p], end='')
+
+        try:
+            if i % 5 == 0:
+                mqtt_client.loop() # this is where the client looks for published messages
+                print(get_voltage(ir_in), sep = '|', end = ' ')
+                neopixels.brightness = 2 - get_voltage(ir_in)
+            
+            if i % 64 == 0: # just a randomy number to publish stuff
+                #print(' Sending photocell value:', '{:4}'.format(photocell_val), '...', end='')
+                #print(photocell_val, end = ' ')
+                print('.', sep = '', end = '')
+                status_light[0] = LED_PURPLE
+                status_light.show()
+                mqtt_client.publish(photocell_feed, photocell_val, qos=0)
+                status_light[0] = LED_GREEN
+                status_light.show()            
+                #print('Sent!')
+                
+        except Exception as e:
+            status_light[0] = LED_RED
+            status_light.show()
+            print ("error publishing:", e)
+            mqtt_connect_all()
+            while(not mqtt_client.is_connected()):
+                print("not is_connected(2). trying connect_all()")
+                mqtt_connect_all()
+                time.sleep(4)
+            print('recovery 2')
+
+        i = (i+1) % 256	 # run from 0 to 255
+        #print(i, end = ' ')
+        time.sleep(0.0)
+
+except Exception as e:
+    # when all else fails
+    print("-----")
+    print("Error: ", sys.print_exception(e))
+    print("Bailing out...reloading")
+    print("-----")
+    supervisor.reload()
