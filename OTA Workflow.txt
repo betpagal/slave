@@ -1,0 +1,6 @@
+1) Get latest release on Github
+	latest_release = requests.get(https://api.github.com/repos/betpagal/slave/releases/latest)
+	version = latest_release.json()['tag_name']
+2) Compare with current version on the chip
+	/next/.version_on_reboot
+3) 
